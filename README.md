@@ -169,32 +169,3 @@ for r in scorer.ddg(["G13C", "A20V"]):
 
 Exactly one of `structure` or `sequence` must be given. The model is loaded once,
 so a batch of mutants costs one load.
-
-## Reproducing the paper
-
-One command, from nothing but a Boltz-2 install:
-
-```bash
-bash evaluation/reproduce.sh cuda:0 cuda:1 cuda:2 cuda:3
-```
-
-It downloads the ProteinGym stability benchmark (1.6 GB),
-runs the invariant tests, scores all 117,811 mutations, refits the kcal/mol
-calibration, and prints the values to expect. About an hour on four GPUs.
-
-To reproduce the structure-free row instead — Boltz-2 folding each assay's wild
-type rather than reading the AlphaFold2 model — add `--fold-wildtype`:
-
-```bash
-python evaluation/reproduce_ddg.py --devices cuda:0 cuda:1 cuda:2 cuda:3 \
-  --msa-dir <data>/msas_a3m --max-msa-seqs 256 --fold-wildtype
-```
-
-About three hours on four GPUs; the 64 folding passes are a small part of it.
-
-Decoy benchmark has its own fetcher:
-
-```bash
-python evaluation/fetch_decoys.py --out data/decoys      # 5.2 GB
-python evaluation/fetch_decoys.py --out data/decoys --tables-only
-```
