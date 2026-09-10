@@ -34,12 +34,7 @@ This potential summarizes the interaction preferences learned by Boltz-2 from pr
 For a structure with residue-pair distances $d_{ij}$, Boltz-PMF calculates the score as
 
 $$
-E = \sum_{ij} w_{ij}
-\left[
-\log p\left(\mathrm{bin}(d_{ij}) \mid s\right)
--
-\log p\left(\mathrm{far} \mid s\right)
-\right].
+E = \sum_{ij} w_{ij}\left[\log p\left(\mathrm{bin}(d_{ij}) \mid s\right)-\log p\left(\mathrm{far} \mid s\right)\right]
 $$
 
 Here:
@@ -54,13 +49,7 @@ Here:
 The far-distance bin provides a natural reference state. Rather than using the absolute probability of a particular residue-pair distance, Boltz-PMF measures how strongly Boltz-2 favors that distance relative to the residues being far apart:
 
 $$
-\log \left(
-\frac{
-p\left(\mathrm{bin}(d_{ij}) \mid s\right)
-}{
-p\left(\mathrm{far} \mid s\right)
-}
-\right).
+\log \left(\frac{p\left(\mathrm{bin}(d_{ij}) \mid s\right)}{p\left(\mathrm{far} \mid s\right)}\right)
 $$
 
 The resulting score can therefore be interpreted as a **sequence-dependent effective interaction potential**.
@@ -209,6 +198,3 @@ Decoy benchmark has its own fetcher:
 python evaluation/fetch_decoys.py --out data/decoys      # 5.2 GB
 python evaluation/fetch_decoys.py --out data/decoys --tables-only
 ```
-## Citation
-
-If you use this, please cite the accompanying paper and Boltz-2.
