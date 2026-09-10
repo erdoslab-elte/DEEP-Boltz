@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "boltz-pmf"
+version = "1.0.0"
+description = "A statistical potential read out of a frozen Boltz-2 checkpoint"
+requires-python = ">=3.10"
+# `boltz` is pinned below 2.3 because this package reads Boltz-2 internals
+# (featurizerv2, tokenize.boltz2, module.inferencev2, parse.schema, models.boltz2)
+# rather than a public API, so a minor release can move them. gemmi parses the
+# user's coordinate file directly, because Boltz's own PDB wrapper builds
+# incomplete entity sequences for headerless AlphaFold models. Both are also
+# boltz dependencies, but are declared here because this package imports them
+# itself and must not break if boltz drops them.
+dependencies = ["numpy", "torch", "gemmi", "boltz>=2.2.1,<2.3"]
+
+[project.scripts]
+boltz-pmf = "boltz_pmf.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["boltz_pmf*"]
