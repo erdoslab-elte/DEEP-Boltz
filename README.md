@@ -6,6 +6,16 @@ Boltz-PMF gives accurate estimates for protein stability using free energy calcu
 
 ## Basic usage
 
+An alignment matters a lot here, and the easiest way to get one is to let
+Boltz-PMF search for it — no alignment file needed:
+
+```bash
+boltz-pmf structure.pdb --use-msa-server --mutations G13C A20V T45S
+```
+
+If you already have an alignment, pass it instead and nothing leaves your
+machine:
+
 ```bash
 boltz-pmf structure.pdb --msa alignment.a3m --mutations G13C A20V T45S
 ```
@@ -78,6 +88,45 @@ with enough memory for the target (roughly N² in chain length).
 
 ## Usage
 
+### Letting the MSA server find the alignment
+
+`--use-msa-server` searches an MMseqs2 server for the alignment, the same way
+`boltz predict --use_msa_server` does. The sequence of the scored chain is read
+straight out of the structure, so there is nothing else to prepare:
+
+```bash
+boltz-pmf structure.pdb --use-msa-server
+```
+
+```
+MSA                searching https://api.colabfold.com (40 residues uploaded); this usually takes a minute
+COMPLETE: 100%|██████████| 150/150 [elapsed: 00:01 remaining: 00:00]
+MSA                cached at ~/.boltz/pmf_msa/121b21e7e8ef2bf9.a3m
+backbone           structure.pdb
+chain length       40 residues
+contributing pairs 475 (pairs beyond 22 A cancel exactly and are excluded)
+alignment          ~/.boltz/pmf_msa/121b21e7e8ef2bf9.a3m (from the MSA server)
+
+energy                 +6.548 kcal/mol   (+1414.3 nats)
+```
+
+**The query sequence is uploaded** to `api.colabfold.com`, a public service, so
+the flag is opt-in and never a fallback. Point `--msa-server-url` at your own
+MMseqs2 server if the sequence cannot leave your network.
+
+The result is cached under `~/.boltz/pmf_msa` (`--msa-cache` to move it), keyed
+by sequence and server, so a rescan or a ΔΔG sweep searches once and every later
+run is offline:
+
+```
+MSA                reusing cached search: ~/.boltz/pmf_msa/121b21e7e8ef2bf9.a3m
+```
+
+Alignments from different sources are not interchangeable at the last decimal —
+the same chain scored `+6.548` from the server and `+6.503` from a hand-built
+alignment, a 0.7% difference, well inside the ±1.05 kcal/mol calibration RMSE
+but not zero. Keep one alignment source across any series you intend to compare.
+
 ### An energy for a structure
 
 ```bash
@@ -95,8 +144,6 @@ alignment          none (single-sequence)
                    accurate. Pass --msa alignment.a3m.
 
 energy                 +9.247 kcal/mol   (+2347.0 nats)
-                   an interaction pseudo-energy, NOT a folding free
-                   energy; only differences are validated.
 ```
 
 ### Without a structure
