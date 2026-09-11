@@ -2,6 +2,13 @@
 
 from __future__ import annotations
 
+import contextlib
+import gzip
+import io
+import tempfile
+import warnings
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import Any
@@ -128,6 +135,19 @@ def _protein_chains_from_structure(
     return parsed_chains
 
 
+def chain_sequence(path: str | Path, chain: str | None = None) -> str:
+    """The one-letter sequence of the chain an alignment would be keyed to.
+
+    The featurizer keys an MSA to the first protein chain, so that is the chain
+    a server search has to be run for.
+    """
+    structure_path = Path(path).expanduser().resolve()
+    if not structure_path.is_file():
+        raise FileNotFoundError(f"Structure not found: {structure_path}")
+    _, residues = _protein_chains_from_structure(structure_path, chain)[0]
+    return "".join(residue[0] for residue in residues)
+
+
 def _target_from_observed_structure(
     path: Path,
     molecules: dict[str, Any],
@@ -169,7 +189,8 @@ def _target_from_observed_structure(
             for (chain_name, _), sequence in zip(source_chains, source_sequences)
         ],
     }
-    target = parse_boltz_schema(path.stem, schema, molecules, mol_dir, True)
+    with _quiet_empty_msa_notice():
+        target = parse_boltz_schema(path.stem, schema, molecules, mol_dir, True)
 
     atoms = target.structure.atoms.copy()
     coords = target.structure.coords.copy()
@@ -247,7 +268,8 @@ def _target_from_sequence(
             {"protein": {"id": chain_name, "sequence": sequence, "msa": "empty"}}
         ],
     }
-    target = parse_boltz_schema("sequence", schema, molecules, mol_dir, True)
+    with _quiet_empty_msa_notice():
+        target = parse_boltz_schema("sequence", schema, molecules, mol_dir, True)
 
     atoms = target.structure.atoms.copy()
     coords = target.structure.coords.copy()
@@ -262,6 +284,92 @@ def _target_from_sequence(
 
     structure = replace(target.structure, atoms=atoms, coords=coords)
     return replace(target, structure=structure), (chain_name,)
+
+
+_EMPTY_MSA_NOTICE = "Found explicit empty MSA for some proteins"
+
+
+@contextmanager
+def _quiet_empty_msa_notice() -> Iterator[None]:
+    """Swallow Boltz's single-sequence-mode notice while parsing a schema.
+
+    Every schema built here declares ``"msa": "empty"``, because an alignment is
+    keyed into the featurizer input afterwards rather than through the schema's
+    MSA ids -- so the notice says nothing about whether this run actually has an
+    MSA.  Anything else Boltz prints is passed through.
+    """
+    captured = io.StringIO()
+    try:
+        with contextlib.redirect_stdout(captured):
+            yield
+    finally:
+        kept = [
+            line
+            for line in captured.getvalue().splitlines()
+            if not line.startswith(_EMPTY_MSA_NOTICE)
+        ]
+        if kept:
+            print("\n".join(kept))
+
+
+def _parse_alignment(path: Path, max_seqs: int) -> Any:
+    """Parse an a3m/a2m alignment into Boltz's MSA object.
+
+    Boltz feeds every character of an alignment row straight into
+    ``prot_letter_to_token``, so anything missing from that table is a KeyError
+    rather than a skipped character: a trailing NUL from a truncated writer, an
+    a2m ``.`` insertion gap, a ``*`` stop codon.  Clean the text up front and
+    hand the parser a temporary copy.
+    """
+    from boltz.data import const
+    from boltz.data.parse.a3m import parse_a3m
+
+    known = set(const.prot_letter_to_token)
+    opener = gzip.open if path.suffix == ".gz" else open
+    with opener(str(path), "rt", errors="replace") as f:
+        raw = f.read()
+
+    lines: list[str] = []
+    dropped: set[str] = set()
+    replaced: set[str] = set()
+    for line in raw.splitlines():
+        # Tabs separate the annotation fields Boltz reads out of headers; every
+        # other control or non-ASCII byte is noise.
+        line = "".join(c for c in line if c == "\t" or (c.isascii() and c.isprintable()))
+        if not line.strip():
+            continue
+        if line.startswith(">"):
+            lines.append(line)
+            continue
+        row = []
+        for c in line.strip():
+            if c in known or c.islower():
+                # Lowercase columns are insertions; the parser counts and skips them.
+                row.append(c)
+            elif c == ".":
+                # a2m gap aligned to an insertion column: stands for no residue.
+                dropped.add(c)
+            else:
+                replaced.add(c)
+                row.append("X")
+        if row:
+            lines.append("".join(row))
+
+    if dropped or replaced:
+        detail = []
+        if replaced:
+            detail.append("read as X: " + " ".join(sorted(replaced)))
+        if dropped:
+            detail.append("ignored: " + " ".join(sorted(dropped)))
+        warnings.warn(
+            f"Unsupported characters in {path.name} ({'; '.join(detail)})",
+            stacklevel=2,
+        )
+
+    with tempfile.TemporaryDirectory() as tmp:
+        clean = Path(tmp) / "alignment.a3m"
+        clean.write_text("\n".join(lines) + "\n")
+        return parse_a3m(clean, taxonomy=None, max_seqs=max_seqs)
 
 
 def _featurize_target(
@@ -285,16 +393,13 @@ def _featurize_target(
 
     parsed_msa: dict[int, Any] = {}
     if msa_path is not None:
-        from boltz.data.parse.a3m import parse_a3m
-
         alignment = Path(msa_path).expanduser().resolve()
         if not alignment.is_file():
             raise FileNotFoundError(f"MSA not found: {alignment}")
         # Keyed by asym_id, which is how the featurizer looks alignments up.
-        parsed_msa[0] = parse_a3m(
+        parsed_msa[0] = _parse_alignment(
             alignment,
-            taxonomy=None,
-            max_seqs=const.max_msa_seqs if max_msa_seqs is None else max_msa_seqs,
+            const.max_msa_seqs if max_msa_seqs is None else max_msa_seqs,
         )
 
     data = Input(

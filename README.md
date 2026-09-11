@@ -89,6 +89,10 @@ structure          structure.pdb
 chain length       47 residues
 contributing pairs 1033 (pairs beyond 22 A cancel exactly and are excluded)
 alignment          none (single-sequence)
+                   WARNING: without an alignment the trunk sees
+                   no coevolution signal, and this energy (and
+                   any ddG below) is significantly less
+                   accurate. Pass --msa alignment.a3m.
 
 energy                 +9.247 kcal/mol   (+2347.0 nats)
                    an interaction pseudo-energy, NOT a folding free
@@ -139,6 +143,7 @@ only). **Positive ΔΔG means stabilising.**
 | flag | why |
 | --- | --- |
 | `--msa alignment.a3m` | **Strongly recommended.** Without it the model runs single-sequence. |
+| `--use-msa-server` | No alignment at hand? Search one on an MMseqs2 server, the way `boltz predict --use_msa_server` does. Uploads the query sequence to `api.colabfold.com` (`--msa-server-url` to point elsewhere), and caches the result under `~/.boltz/pmf_msa` (`--msa-cache`) so later runs are offline. |
 | `--no-volume-correction` | Disables the radial term. |
 | `--sequence` / `--fasta` | Fold the wild type instead of supplying coordinates. Mutually exclusive with a structure file. |
 | `--sampling-steps 200` | Reverse-diffusion steps when folding. Ignored with a structure file. |
@@ -153,6 +158,8 @@ only). **Positive ΔΔG means stabilising.**
 from boltz_pmf import PMFScorer
 
 scorer = PMFScorer("structure.pdb", msa="alignment.a3m", device="cuda:0")
+# ... or let the MSA server find one (uploads the sequence):
+scorer = PMFScorer("structure.pdb", use_msa_server=True, device="cuda:0")
 print(scorer.energy().kcal_per_mol)
 for r in scorer.ddg(["G13C", "A20V"]):
     print(r.label, r.ddg_kcal_per_mol)

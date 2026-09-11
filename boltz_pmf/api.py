@@ -12,6 +12,7 @@ so no external structure is needed and the pipeline contains one model
 from __future__ import annotations
 
 import gc
+import warnings
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -19,13 +20,42 @@ import numpy as np
 import torch
 
 from . import mutations as mut
-from ._adapter import featurize_structure, load_boltz2_model
+from ._adapter import chain_sequence, featurize_structure, load_boltz2_model
 from ._features import features_with_sequence, features_with_sequences, fixed_backbone_features
 from ._trunk import Boltz2EnergyScorer
 from .calibration import Calibration
 from .folding import DEFAULT_SAMPLING_STEPS, fold_sequence
+from .msa_server import DEFAULT_MSA_SERVER, fetch_msa
 from .potential import (
     PotentialConfig, bin_log_volumes, pair_potential, pair_weights, residue_profile)
+
+
+def _use_full_fp32_matmuls() -> None:
+    """Keep matmuls in full fp32 rather than TF32.
+
+    Torch's default, restated so a dependency that flips it does not quietly
+    change the energies.  ``set_float32_matmul_precision`` is deprecated after
+    torch 2.9 and warns; the per-backend setting replacing it says the same
+    thing, so prefer it and fall back on older torch.
+    """
+    matmul = torch.backends.cuda.matmul
+    if hasattr(matmul, "fp32_precision"):
+        matmul.fp32_precision = "ieee"
+    else:
+        torch.set_float32_matmul_precision("highest")
+
+
+class NoMSAWarning(UserWarning):
+    """No alignment was given, so the trunk runs in single-sequence mode."""
+
+
+NO_MSA_MESSAGE = (
+    "no MSA supplied, so Boltz-2 runs single-sequence: the distograms this "
+    "potential reads are built without any coevolution signal, and both the "
+    "energy and any ddG derived from it are significantly less accurate -- an "
+    "alignment is worth +0.19 Spearman on ddG. Pass one for the chain being "
+    "scored, or set use_msa_server=True to search for one."
+)
 
 
 @dataclass
@@ -57,6 +87,9 @@ class PMFScorer:
         chain: str | None = None,
         config: PotentialConfig | None = None,
         msa: str | Path | None = None,
+        use_msa_server: bool = False,
+        msa_server_url: str = DEFAULT_MSA_SERVER,
+        msa_cache: str | Path | None = None,
         device: str = "cuda:0",
         checkpoint: str | Path | None = None,
         calibration: Calibration | None = None,
@@ -68,10 +101,25 @@ class PMFScorer:
                 "supply exactly one of `structure` (score the coordinates you "
                 "have) or `sequence` (let Boltz-2 fold the wild type itself)"
             )
+        if msa is not None and use_msa_server:
+            raise ValueError(
+                "pass either `msa` (an alignment you already have) or "
+                "`use_msa_server` (search for one), not both"
+            )
+        if use_msa_server:
+            # Uploads the query sequence, so it happens only when asked for.
+            msa = fetch_msa(
+                sequence if sequence is not None else chain_sequence(structure, chain),
+                cache_dir=msa_cache,
+                server_url=msa_server_url,
+            )
+        self.msa_path = Path(msa) if msa is not None else None
+        if msa is None:
+            warnings.warn(NO_MSA_MESSAGE, NoMSAWarning, stacklevel=2)
         self.config = config or PotentialConfig()
         self.calibration = calibration or Calibration()
         self.device = device
-        torch.set_float32_matmul_precision("highest")
+        _use_full_fp32_matmuls()
         self.model = load_boltz2_model(checkpoint, device=device)
         self._scorer = Boltz2EnergyScorer(self.model)
 

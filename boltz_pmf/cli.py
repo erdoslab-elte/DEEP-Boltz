@@ -5,7 +5,10 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import warnings
 from pathlib import Path
+
+from .msa_server import DEFAULT_CACHE_DIR, DEFAULT_MSA_SERVER
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -48,6 +51,15 @@ pair of them (positions must differ). Positive ddG means stabilising.
                    help="Alignment (a3m/a2m) for the scored chain. Strongly "
                         "recommended: worth +0.19 Spearman on ddG. Without it "
                         "the model runs single-sequence.")
+    p.add_argument("--use-msa-server", action="store_true",
+                   help="Search an MMseqs2 server for the alignment instead of "
+                        "supplying one. Uploads the query sequence to the "
+                        "server; results are cached by sequence.")
+    p.add_argument("--msa-server-url", default=DEFAULT_MSA_SERVER,
+                   help=f"MSA server to search (default {DEFAULT_MSA_SERVER}).")
+    p.add_argument("--msa-cache", type=Path, default=None,
+                   help=f"Where searched alignments are kept (default "
+                        f"{DEFAULT_CACHE_DIR}).")
     p.add_argument("--msa-depth", type=int, default=256,
                    help="Alignment depth cap (default 256, the selected value).")
     p.add_argument("--max-order", type=int, default=2, choices=(1, 2),
@@ -98,7 +110,7 @@ def main(argv: list[str] | None = None) -> int:
     if sequence is not None:
         sequence = "".join(sequence.split()).upper()
 
-    from .api import PMFScorer
+    from .api import NoMSAWarning, PMFScorer
     from .calibration import LOAO_RMSE, NULL_RMSE
     from .potential import PotentialConfig
 
@@ -108,11 +120,17 @@ def main(argv: list[str] | None = None) -> int:
         msa_depth=args.msa_depth,
     )
     try:
-        scorer = PMFScorer(args.structure, sequence=sequence, chain=args.chain,
-                           config=config, msa=args.msa, device=args.device,
-                           checkpoint=args.checkpoint,
-                           sampling_steps=args.sampling_steps,
-                           fold_seed=args.fold_seed)
+        # The summary below carries this warning in its own format.
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", NoMSAWarning)
+            scorer = PMFScorer(args.structure, sequence=sequence, chain=args.chain,
+                               config=config, msa=args.msa,
+                               use_msa_server=args.use_msa_server,
+                               msa_server_url=args.msa_server_url,
+                               msa_cache=args.msa_cache, device=args.device,
+                               checkpoint=args.checkpoint,
+                               sampling_steps=args.sampling_steps,
+                               fold_seed=args.fold_seed)
     except ValueError as error:
         print(f"error: {error}", file=sys.stderr)
         return 2
@@ -135,7 +153,9 @@ def main(argv: list[str] | None = None) -> int:
         "energy_nats": energy.nats,
         "energy_kcal_per_mol": energy.kcal_per_mol,
         "contributing_pairs": energy.n_contributing_pairs,
-        "alignment": str(args.msa) if args.msa else None,
+        "alignment": str(scorer.msa_path) if scorer.msa_path else None,
+        "alignment_source": ("msa server" if args.use_msa_server else
+                             "supplied" if args.msa else None),
         "volume_correction": config.volume_correction,
         "weighting": config.weighting,
     }
@@ -150,12 +170,17 @@ def main(argv: list[str] | None = None) -> int:
     print(f"chain length       {energy.n_residues} residues")
     print(f"contributing pairs {energy.n_contributing_pairs} "
           f"(pairs beyond 22 A cancel exactly and are excluded)")
-    print(f"alignment          {args.msa if args.msa else 'none (single-sequence)'}")
+    alignment = scorer.msa_path
+    print(f"alignment          {alignment if alignment else 'none (single-sequence)'}"
+          f"{' (from the MSA server)' if args.use_msa_server else ''}")
+    if alignment is None:
+        print("                   WARNING: without an alignment the trunk sees")
+        print("                   no coevolution signal, and this energy (and")
+        print("                   any ddG below) is significantly less")
+        print("                   accurate. Pass --msa alignment.a3m.")
     print()
     print(f"energy             {energy.kcal_per_mol:+10.3f} kcal/mol"
           f"   ({energy.nats:+.1f} nats)")
-    print("                   an interaction pseudo-energy, NOT a folding free")
-    print("                   energy; only differences are validated.")
 
     if args.mutations:
         try:
@@ -177,10 +202,7 @@ def main(argv: list[str] | None = None) -> int:
             for r in pairs:
                 print(f"{r.label:<20}{r.ddg_kcal_per_mol:>16.3f}{r.delta_nats:>15.1f}")
         print()
-        print("positive ddG = stabilising. Leave-one-assay-out accuracy on")
-        print(f"ProteinGym Stability: RMSE {LOAO_RMSE:.2f} kcal/mol against a")
-        print(f"{NULL_RMSE:.2f} null, per-assay Spearman 0.657. The ranking is")
-        print("more trustworthy than the magnitude.")
+        print("positive ddG = stabilising.")
         payload["ddg"] = [
             {"label": r.label, "mutations": list(r.mutations),
              "ddg_kcal_per_mol": r.ddg_kcal_per_mol, "delta_nats": r.delta_nats}
