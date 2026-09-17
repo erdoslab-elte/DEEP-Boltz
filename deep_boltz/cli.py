@@ -13,19 +13,19 @@ from .msa_server import DEFAULT_CACHE_DIR, DEFAULT_MSA_SERVER
 
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
-        prog="boltz-pmf",
+        prog="deep-boltz",
         description="Statistical-potential energy from a frozen Boltz-2 checkpoint.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 examples:
-  boltz-pmf structure.pdb --mutations G13C A20V T45S
-  boltz-pmf structure.pdb --msa alignment.a3m --mutations G13C A20V
-  boltz-pmf structure.pdb --mutations 13C 20V --json out.json
+  deep-boltz structure.pdb --mutations G13C A20V T45S
+  deep-boltz structure.pdb --msa alignment.a3m --mutations G13C A20V
+  deep-boltz structure.pdb --mutations 13C 20V --json out.json
 
-  boltz-pmf --sequence MKVLA... --mutations G13C A20V
-  boltz-pmf --fasta target.fasta --msa alignment.a3m --mutations G13C
+  deep-boltz --sequence MKVLA... --mutations G13C A20V
+  deep-boltz --fasta target.fasta --msa alignment.a3m --mutations G13C
 
-Boltz-PMF reports ddG for every single substitution and every 
+DEEP-Boltz reports ddG for every single substitution and every 
 pair of them (positions must differ). Positive ddGmeans stabilising.
 
 The wild-type letter is optional: 13C and G13C mean the same thing, and when it
@@ -121,7 +121,7 @@ def main(argv: list[str] | None = None) -> int:
     if sequence is not None:
         sequence = "".join(sequence.split()).upper()
 
-    from .api import NoMSAWarning, PMFScorer
+    from .api import DEEPScorer, NoMSAWarning
     from .calibration import Calibration
     from .potential import PotentialConfig
 
@@ -150,7 +150,7 @@ def main(argv: list[str] | None = None) -> int:
         # The summary below carries this warning in its own format.
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", NoMSAWarning)
-            scorer = PMFScorer(args.structure, sequence=sequence, chain=args.chain,
+            scorer = DEEPScorer(args.structure, sequence=sequence, chain=args.chain,
                                config=config, msa=args.msa,
                                use_msa_server=args.use_msa_server,
                                msa_server_url=args.msa_server_url,

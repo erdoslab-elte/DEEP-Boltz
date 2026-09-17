@@ -529,7 +529,7 @@ def featurize_sequence(
 
     The returned batch carries the correct packed atom layout and masks but
     placeholder coordinates at the origin.  It is the input to the folding pass
-    in :mod:`boltz_pmf.folding`.
+    in :mod:`deep_boltz.folding`.
     """
 
     from boltz.data.mol import load_canonicals

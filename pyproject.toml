@@ -3,7 +3,7 @@ requires = ["setuptools>=64"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "boltz-pmf"
+name = "deep-boltz"
 version = "1.0.0"
 description = "A statistical potential read out of a frozen Boltz-2 checkpoint"
 requires-python = ">=3.10"
@@ -17,7 +17,7 @@ requires-python = ">=3.10"
 dependencies = ["numpy", "torch", "gemmi", "boltz>=2.2.1,<2.3"]
 
 [project.scripts]
-boltz-pmf = "boltz_pmf.cli:main"
+deep-boltz = "deep_boltz.cli:main"
 
 [tool.setuptools.packages.find]
-include = ["boltz_pmf*"]
+include = ["deep_boltz*"]

@@ -13,7 +13,7 @@ import tempfile
 from pathlib import Path
 
 DEFAULT_MSA_SERVER = "https://api.colabfold.com"
-DEFAULT_CACHE_DIR = Path("~/.boltz/pmf_msa")
+DEFAULT_CACHE_DIR = Path("~/.deep_boltz/msa_cache")
 
 _AMINO_ACIDS = set("ACDEFGHIKLMNPQRSTVWY")
 

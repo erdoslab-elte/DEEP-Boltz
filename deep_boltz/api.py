@@ -78,7 +78,7 @@ class DdgResult:
     n_pairs: int = 0          # pairs inside the radius that carry weight
 
 
-class PMFScorer:
+class DEEPScorer:
     """Holds the model so a batch of mutants costs one load, not many."""
 
     def __init__(

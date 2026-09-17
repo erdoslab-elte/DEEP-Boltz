@@ -1,16 +1,17 @@
-# Boltz-PMF
+# DEEP-Boltz
 
 A zero-shot statistical potential from the **Boltz-2** structure prediction method.
+**DEEP** stands for *Distogram Encoded Energetic Potential*.
 
-Boltz-PMF gives accurate estimates for protein stability using free energy calculation.
+DEEP-Boltz gives accurate estimates for protein stability using free energy calculation.
 
 ## Basic usage
 
 An alignment matters a lot here, and the easiest way to get one is to let
-Boltz-PMF search for it — no alignment file needed:
+DEEP-Boltz search for it — no alignment file needed:
 
 ```bash
-boltz-pmf structure.pdb --use-msa-server --mutations G13C A20V T45S
+deep-boltz structure.pdb --use-msa-server --mutations G13C A20V T45S
 ```
 
 The wild-type letter
@@ -21,14 +22,14 @@ If you already have an alignment, pass it instead and nothing leaves your
 machine:
 
 ```bash
-boltz-pmf structure.pdb --msa alignment.a3m --mutations G13C A20V T45S
+deep-boltz structure.pdb --msa alignment.a3m --mutations G13C A20V T45S
 ```
 
-**A structure is optional.** Boltz-PMF can also generate the reference wild type structure, 
+**A structure is optional.** DEEP-Boltz can also generate the reference wild type structure, 
 then scores mutations against its own prediction.
 
 ```bash
-boltz-pmf --sequence MKVLATDLA... --msa alignment.a3m --mutations G13C A20V T45S
+deep-boltz --sequence MKVLATDLA... --msa alignment.a3m --mutations G13C A20V T45S
 ```
 
 On ProteinGym Stability, ΔΔG reaches **0.7197** mean per-assay Spearman over all
@@ -38,15 +39,15 @@ sum.
 
 ---
 
-## What is Boltz-PMF?
+## What is DEEP-Boltz?
 
-Boltz-PMF converts the structural information learned by Boltz-2 into an effective, sequence-dependent energy function.
+DEEP-Boltz converts the structural information learned by Boltz-2 into an effective, sequence-dependent energy function.
 
 Boltz-2's distogram head predicts, for every pair of residues, a probability distribution over their spatial separation given the protein sequence. Through the Boltzmann relation, a probability distribution along a coordinate can be interpreted as an effective free-energy profile. We therefore treat the predicted distograms as defining an **implied potential of mean force (PMF)** over residue-residue distances.
 
 This potential summarizes the interaction preferences learned by Boltz-2 from protein structures, with effects such as solvent and other unobserved degrees of freedom implicitly integrated out.
 
-For a structure with residue-pair distances $d_{ij}$, Boltz-PMF calculates the score as
+For a structure with residue-pair distances $d_{ij}$, DEEP-Boltz calculates the score as
 
 $$
 E = \sum_{ij} w_{ij}\left[\log p\left(\mathrm{bin}(d_{ij}) \mid s\right)-\log p\left(\mathrm{far} \mid s\right)\right]
@@ -61,7 +62,7 @@ Here:
 
 ### Reference-state normalization
 
-The far-distance bin provides a natural reference state. Rather than using the absolute probability of a particular residue-pair distance, Boltz-PMF measures how strongly Boltz-2 favors that distance relative to the residues being far apart:
+The far-distance bin provides a natural reference state. Rather than using the absolute probability of a particular residue-pair distance, DEEP-Boltz measures how strongly Boltz-2 favors that distance relative to the residues being far apart:
 
 $$
 \log \left(\frac{p\left(\mathrm{bin}(d_{ij}) \mid s\right)}{p\left(\mathrm{far} \mid s\right)}\right)
@@ -116,7 +117,7 @@ This reference-state interpretation is particularly relevant because Boltz-2 is 
 
 Consequently, the model does not contain an explicit physical unfolded-state ensemble that can be used directly as a reference state. Normalization by the far-distance bin provides a simple alternative: it removes the background probability of two residues being effectively non-interacting and isolates the model's preference for bringing them to a particular distance.
 
-In this sense, the far-bin normalization plays a role analogous to the **reference state in conventional statistical potentials**, while the resulting Boltz-PMF score captures the sequence-dependent structural preferences encoded by Boltz-2.
+In this sense, the far-bin normalization plays a role analogous to the **reference state in conventional statistical potentials**, while the resulting DEEP-Boltz score captures the sequence-dependent structural preferences encoded by Boltz-2.
 
 ## Installation
 
@@ -124,8 +125,8 @@ Boltz-2 must already be installed and its weights available; this package reads
 that checkpoint and does not ship one.
 
 ```bash
-git clone <url> boltz_pmf
-cd boltz_pmf
+git clone <url> DEEP-Boltz
+cd DEEP-Boltz
 pip install -e .
 ```
 
@@ -141,17 +142,17 @@ with enough memory for the target (roughly N² in chain length).
 straight out of the structure, so there is nothing else to prepare:
 
 ```bash
-boltz-pmf structure.pdb --use-msa-server --mutations G13C
+deep-boltz structure.pdb --use-msa-server --mutations G13C
 ```
 
 ```
 MSA                searching https://api.colabfold.com (40 residues uploaded); this usually takes a minute
 COMPLETE: 100%|██████████| 150/150 [elapsed: 00:01 remaining: 00:00]
-MSA                cached at ~/.boltz/pmf_msa/121b21e7e8ef2bf9.a3m
+MSA                cached at ~/.deep_boltz/msa_cache/121b21e7e8ef2bf9.a3m
 backbone           structure.pdb
 chain length       40 residues
 contributing pairs 475 (pairs beyond 22 A cancel exactly and are excluded)
-alignment          ~/.boltz/pmf_msa/121b21e7e8ef2bf9.a3m (from the MSA server)
+alignment          ~/.deep_boltz/msa_cache/121b21e7e8ef2bf9.a3m (from the MSA server)
 
 energy                 +6.548 kcal/mol   (+1414.3 nats)
 ddG radius         6 A around each mutated residue
@@ -162,12 +163,12 @@ ddG radius         6 A around each mutated residue
 the flag is opt-in and never a fallback. Point `--msa-server-url` at your own
 MMseqs2 server if the sequence cannot leave your network.
 
-The result is cached under `~/.boltz/pmf_msa` (`--msa-cache` to move it), keyed
+The result is cached under `~/.deep_boltz/msa_cache` (`--msa-cache` to move it), keyed
 by sequence and server, so a rescan or a ΔΔG sweep searches once and every later
 run is offline:
 
 ```
-MSA                reusing cached search: ~/.boltz/pmf_msa/121b21e7e8ef2bf9.a3m
+MSA                reusing cached search: ~/.deep_boltz/msa_cache/121b21e7e8ef2bf9.a3m
 ```
 
 Alignments from different sources are not interchangeable at the last decimal —
@@ -184,7 +185,7 @@ between different proteins, so compare it only between conformations of one
 chain.
 
 ```bash
-boltz-pmf structure.pdb --mutations G13C
+deep-boltz structure.pdb --mutations G13C
 ```
 
 ```
@@ -203,8 +204,8 @@ energy                 +9.247 kcal/mol   (+2347.0 nats)
 ### Without a structure
 
 ```bash
-boltz-pmf --sequence MKVLATDLA... --mutations A10C F17R --save-folded wt.pdb
-boltz-pmf --fasta target.fasta --msa alignment.a3m --mutations A10C
+deep-boltz --sequence MKVLATDLA... --mutations A10C F17R --save-folded wt.pdb
+deep-boltz --fasta target.fasta --msa alignment.a3m --mutations A10C
 ```
 
 Boltz-2 folds the wild type once and every mutant is scored against that fixed
@@ -227,7 +228,7 @@ selects the same neighbourhoods as the deposited one (340/178/340 pairs against
 ### ΔΔG for substitutions
 
 ```bash
-boltz-pmf structure.pdb --msa alignment.a3m --mutations 10C F17R 38V
+deep-boltz structure.pdb --msa alignment.a3m --mutations 10C F17R 38V
 ```
 
 ```
@@ -257,7 +258,7 @@ says which residue was replaced.
 | --- | --- |
 | `--mutations G13C 20V` | **Required.** `G13C` or `20V`; the wild-type letter is optional and is checked when present. |
 | `--msa alignment.a3m` | **Strongly recommended.** Without it the model runs single-sequence. |
-| `--use-msa-server` | No alignment at hand? Search one on an MMseqs2 server, the way `boltz predict --use_msa_server` does. Uploads the query sequence to `api.colabfold.com` (`--msa-server-url` to point elsewhere), and caches the result under `~/.boltz/pmf_msa` (`--msa-cache`) so later runs are offline. |
+| `--use-msa-server` | No alignment at hand? Search one on an MMseqs2 server, the way `boltz predict --use_msa_server` does. Uploads the query sequence to `api.colabfold.com` (`--msa-server-url` to point elsewhere), and caches the result under `~/.deep_boltz/msa_cache` (`--msa-cache`) so later runs are offline. |
 | `--radius 6` | Å around each mutated residue that ΔΔG is summed over. The default is the selected value; `--radius none` gives the untruncated sum. Only radii with a fitted kcal/mol calibration are accepted (4, 6, 8, 10, 12, 16, 22, none). |
 | `--no-volume-correction` | Disables the radial term. |
 | `--sequence` / `--fasta` | Fold the wild type instead of supplying coordinates. Mutually exclusive with a structure file. |
@@ -270,11 +271,11 @@ says which residue was replaced.
 ### As a library
 
 ```python
-from boltz_pmf import PMFScorer
+from deep_boltz import DEEPScorer
 
-scorer = PMFScorer("structure.pdb", msa="alignment.a3m", device="cuda:0")
+scorer = DEEPScorer("structure.pdb", msa="alignment.a3m", device="cuda:0")
 # ... or let the MSA server find one (uploads the sequence):
-scorer = PMFScorer("structure.pdb", use_msa_server=True, device="cuda:0")
+scorer = DEEPScorer("structure.pdb", use_msa_server=True, device="cuda:0")
 print(scorer.energy().kcal_per_mol)
 for r in scorer.ddg(["G13C", "A20V"]):
     print(r.label, r.ddg_kcal_per_mol)
@@ -283,7 +284,7 @@ for r in scorer.ddg(["G13C", "A20V"]):
 Or with no structure at all:
 
 ```python
-scorer = PMFScorer(sequence="MKVLATDLA...", msa="alignment.a3m", device="cuda:0")
+scorer = DEEPScorer(sequence="MKVLATDLA...", msa="alignment.a3m", device="cuda:0")
 scorer.folded.backbone_coords        # what Boltz predicted, N/CA/C/O per residue
 for r in scorer.ddg(["G13C", "A20V"]):
     print(r.label, r.ddg_kcal_per_mol)
@@ -295,9 +296,9 @@ so a batch of mutants costs one load.
 The radius lives on `PotentialConfig`, and the kcal/mol calibration follows it:
 
 ```python
-from boltz_pmf import PMFScorer, PotentialConfig
+from deep_boltz import DEEPScorer, PotentialConfig
 
-scorer = PMFScorer("structure.pdb", msa="alignment.a3m",
+scorer = DEEPScorer("structure.pdb", msa="alignment.a3m",
                    config=PotentialConfig(radius=None))   # untruncated
 for r in scorer.ddg(["G13C"]):
     print(r.label, r.ddg_kcal_per_mol, r.n_pairs)
