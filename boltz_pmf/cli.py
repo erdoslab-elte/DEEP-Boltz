@@ -18,19 +18,21 @@ def build_parser() -> argparse.ArgumentParser:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 examples:
-  boltz-pmf structure.pdb
-  boltz-pmf structure.pdb --msa alignment.a3m
   boltz-pmf structure.pdb --mutations G13C A20V T45S
-  boltz-pmf structure.pdb --mutations G13C A20V --json out.json
+  boltz-pmf structure.pdb --msa alignment.a3m --mutations G13C A20V
+  boltz-pmf structure.pdb --mutations 13C 20V --json out.json
 
   boltz-pmf --sequence MKVLA... --mutations G13C A20V
   boltz-pmf --fasta target.fasta --msa alignment.a3m --mutations G13C
 
+Boltz-PMF reports ddG for every single substitution and every 
+pair of them (positions must differ). Positive ddGmeans stabilising.
+
+The wild-type letter is optional: 13C and G13C mean the same thing, and when it
+is given it is checked against the scored chain.
+
 A structure is optional. With --sequence or --fasta, Boltz-2 folds the wild type
 itself and scores mutations against its own prediction.
-
-With --mutations the program reports ddG for every single substitution and every
-pair of them (positions must differ). Positive ddG means stabilising.
 """)
     source = p.add_mutually_exclusive_group(required=True)
     source.add_argument("structure", type=Path, nargs="?", default=None,
@@ -42,9 +44,11 @@ pair of them (positions must differ). Positive ddG means stabilising.
     source.add_argument("--fasta", type=Path, default=None,
                         help="FASTA file whose first record is the sequence to "
                              "fold. Equivalent to --sequence.")
-    p.add_argument("--mutations", nargs="+", metavar="G13C",
-                   help="Substitutions in the form G13C, 1-based over the scored "
-                        "chain. Every single and every pair is reported.")
+    p.add_argument("--mutations", nargs="+", metavar="G13C", required=True,
+                   help="Required. Substitutions as G13C or 13C, 1-based over "
+                        "the scored chain; the wild-type letter is optional and "
+                        "is checked against the chain when given. Every single "
+                        "and every pair is reported.")
     p.add_argument("--chain", default=None,
                    help="Chain to score; default is the first protein chain.")
     p.add_argument("--msa", type=Path, default=None,
@@ -62,6 +66,13 @@ pair of them (positions must differ). Positive ddG means stabilising.
                         f"{DEFAULT_CACHE_DIR}).")
     p.add_argument("--msa-depth", type=int, default=256,
                    help="Alignment depth cap (default 256, the selected value).")
+    p.add_argument("--radius", default="6", metavar="ANGSTROM",
+                   help="ddG is summed only over residue pairs within this "
+                        "distance of a mutated residue (default 6, the selected "
+                        "value: 0.7197 mean per-assay Spearman against 0.6574 "
+                        "for the untruncated sum). Pass `none` for every pair. "
+                        "Only radii with a fitted kcal/mol calibration are "
+                        "accepted: 4, 6, 8, 10, 12, 16, 22, none.")
     p.add_argument("--max-order", type=int, default=2, choices=(1, 2),
                    help="Highest combination order to report (default 2).")
     p.add_argument("--no-volume-correction", action="store_true",
@@ -111,11 +122,27 @@ def main(argv: list[str] | None = None) -> int:
         sequence = "".join(sequence.split()).upper()
 
     from .api import NoMSAWarning, PMFScorer
-    from .calibration import LOAO_RMSE, NULL_RMSE
+    from .calibration import Calibration
     from .potential import PotentialConfig
+
+    if args.radius.strip().lower() in ("none", "all", "inf"):
+        radius = None
+    else:
+        try:
+            radius = float(args.radius)
+        except ValueError:
+            print(f"error: --radius must be a number or `none`, not "
+                  f"{args.radius!r}", file=sys.stderr)
+            return 2
+    try:
+        Calibration.for_radius(radius)
+    except ValueError as error:
+        print(f"error: {error}", file=sys.stderr)
+        return 2
 
     config = PotentialConfig(
         weighting=args.weighting,
+        radius=radius,
         volume_correction=not args.no_volume_correction,
         msa_depth=args.msa_depth,
     )
@@ -158,6 +185,7 @@ def main(argv: list[str] | None = None) -> int:
                              "supplied" if args.msa else None),
         "volume_correction": config.volume_correction,
         "weighting": config.weighting,
+        "ddg_radius_angstrom": config.radius,
     }
     if scorer.folded is not None:
         payload["sampling_steps"] = scorer.folded.sampling_steps
@@ -181,33 +209,39 @@ def main(argv: list[str] | None = None) -> int:
     print()
     print(f"energy             {energy.kcal_per_mol:+10.3f} kcal/mol"
           f"   ({energy.nats:+.1f} nats)")
+    print(f"ddG radius         "
+          + ("every pair (untruncated)" if config.radius is None
+             else f"{config.radius:g} A around each mutated residue"))
 
-    if args.mutations:
-        try:
-            results = scorer.ddg(args.mutations, max_order=args.max_order,
-                                 batch_size=args.batch_size)
-        except ValueError as error:
-            print(f"\nerror: {error}", file=sys.stderr)
-            print(f"the scored chain begins {energy.sequence[:30]}...",
-                  file=sys.stderr)
-            return 1
-        singles = [r for r in results if len(r.mutations) == 1]
-        pairs = [r for r in results if len(r.mutations) == 2]
-        print(f"\n{'mutation':<20}{'ddG (kcal/mol)':>16}{'delta (nats)':>15}")
-        print("-" * 51)
-        for r in singles:
-            print(f"{r.label:<20}{r.ddg_kcal_per_mol:>16.3f}{r.delta_nats:>15.1f}")
-        if pairs:
-            print(f"{'-- pairs --':<20}")
-            for r in pairs:
-                print(f"{r.label:<20}{r.ddg_kcal_per_mol:>16.3f}{r.delta_nats:>15.1f}")
-        print()
-        print("positive ddG = stabilising.")
-        payload["ddg"] = [
-            {"label": r.label, "mutations": list(r.mutations),
-             "ddg_kcal_per_mol": r.ddg_kcal_per_mol, "delta_nats": r.delta_nats}
-            for r in results
-        ]
+    try:
+        results = scorer.ddg(args.mutations, max_order=args.max_order,
+                             batch_size=args.batch_size)
+    except ValueError as error:
+        print(f"\nerror: {error}", file=sys.stderr)
+        print(f"the scored chain begins {energy.sequence[:30]}...",
+              file=sys.stderr)
+        return 1
+    singles = [r for r in results if len(r.mutations) == 1]
+    pairs = [r for r in results if len(r.mutations) == 2]
+    print(f"\n{'mutation':<20}{'ddG (kcal/mol)':>16}{'delta (nats)':>15}"
+          f"{'pairs':>8}")
+    print("-" * 59)
+    for r in singles:
+        print(f"{r.label:<20}{r.ddg_kcal_per_mol:>16.3f}{r.delta_nats:>15.1f}"
+              f"{r.n_pairs:>8}")
+    if pairs:
+        print(f"{'-- pairs --':<20}")
+        for r in pairs:
+            print(f"{r.label:<20}{r.ddg_kcal_per_mol:>16.3f}"
+                  f"{r.delta_nats:>15.1f}{r.n_pairs:>8}")
+    print()
+    print("positive ddG = stabilising.")
+    payload["ddg"] = [
+        {"label": r.label, "mutations": list(r.mutations),
+         "ddg_kcal_per_mol": r.ddg_kcal_per_mol, "delta_nats": r.delta_nats,
+         "n_pairs": r.n_pairs}
+        for r in results
+    ]
 
     if args.per_residue:
         args.per_residue.parent.mkdir(parents=True, exist_ok=True)

@@ -23,11 +23,12 @@ from . import mutations as mut
 from ._adapter import chain_sequence, featurize_structure, load_boltz2_model
 from ._features import features_with_sequence, features_with_sequences, fixed_backbone_features
 from ._trunk import Boltz2EnergyScorer
-from .calibration import Calibration
+from .calibration import Calibration, energy_kcal
 from .folding import DEFAULT_SAMPLING_STEPS, fold_sequence
 from .msa_server import DEFAULT_MSA_SERVER, fetch_msa
 from .potential import (
-    PotentialConfig, bin_log_volumes, pair_potential, pair_weights, residue_profile)
+    PotentialConfig, bin_log_volumes, pair_potential, pair_weights, residue_profile,
+    site_pair_mask)
 
 
 def _use_full_fp32_matmuls() -> None:
@@ -74,6 +75,7 @@ class DdgResult:
     delta_nats: float
     ddg_kcal_per_mol: float
     mutations: tuple[str, ...]
+    n_pairs: int = 0          # pairs inside the radius that carry weight
 
 
 class PMFScorer:
@@ -117,7 +119,9 @@ class PMFScorer:
         if msa is None:
             warnings.warn(NO_MSA_MESSAGE, NoMSAWarning, stacklevel=2)
         self.config = config or PotentialConfig()
-        self.calibration = calibration or Calibration()
+        # The kcal/mol slope is a property of the radius, so it follows it unless
+        # the caller has fitted their own.
+        self.calibration = calibration or Calibration.for_radius(self.config.radius)
         self.device = device
         _use_full_fp32_matmuls()
         self.model = load_boltz2_model(checkpoint, device=device)
@@ -204,6 +208,8 @@ class PMFScorer:
             terms = pair_potential(log_probs, bins, pair_mask,
                                    log_volume=self._log_volume).cpu().numpy()
             if reference:
+                # Frozen here and never recomputed: see `site_pair_mask`.
+                self._distances = distances[0, :n_tok, :n_tok].cpu().numpy()
                 stats = {k: v.cpu().numpy()[0] for k, v in
                          self._scorer.distogram_pair_stats(context).items()}
                 if self.folded is not None:
@@ -227,6 +233,27 @@ class PMFScorer:
         off = ~np.eye(terms.shape[0], dtype=bool)
         return float((terms * self._weights * off).sum())
 
+    def _site_mask(self, sites: tuple[int, ...]) -> np.ndarray:
+        if self.config.radius is None:
+            return np.ones_like(self._distances, dtype=bool)
+        return site_pair_mask(self._distances, sites, self.config.radius)
+
+    def _delta(self, terms: np.ndarray, sites: tuple[int, ...]) -> tuple[float, int]:
+        """ddG in nats, and how many weighted pairs produced it.
+
+        The spatial mask is keyed on the mutated residue, so it cannot be applied
+        to the wild type and the mutant separately -- each would then be summed
+        over its own pair set and the difference would not be a difference of one
+        system. It is applied to the per-pair *difference* instead, which is the
+        same object either way when the radius is infinite.
+        """
+
+        off = ~np.eye(terms.shape[0], dtype=bool)
+        mask = self._site_mask(sites) & off
+        weighted = (terms - self._reference[0]) * self._weights * mask
+        live = int((mask & (self._weights != 0)).sum() // 2)
+        return float(weighted.sum()), live
+
     # -- public ------------------------------------------------------------
 
     def energy(self) -> EnergyResult:
@@ -236,7 +263,7 @@ class PMFScorer:
         live = int(((np.abs(terms) > 1e-9) & off).sum() // 2)
         return EnergyResult(
             nats=nats,
-            kcal_per_mol=self.calibration.energy(nats, self._n_tok),
+            kcal_per_mol=energy_kcal(nats, self._n_tok),
             n_residues=self._n_tok,
             n_contributing_pairs=live,
             sequence=self.sequence,
@@ -245,11 +272,11 @@ class PMFScorer:
 
     def ddg(self, tokens: list[str], *, max_order: int = 2,
             batch_size: int = 8) -> list[DdgResult]:
-        parsed = [mut.parse(t) for t in tokens]
-        for m in parsed:
-            mut.validate(m, self.sequence)
+        if not tokens:
+            raise ValueError(
+                "ddg() needs at least one substitution, there is nothing to score without one")
+        parsed = [mut.resolve(mut.parse(t), self.sequence) for t in tokens]
         combos = mut.combinations(parsed, max_order=max_order)
-        wt_nats = self._total(self._reference[0])
 
         results: list[DdgResult] = []
         for start in range(0, len(combos), batch_size):
@@ -257,11 +284,14 @@ class PMFScorer:
             seqs = [mut.apply(self.sequence, c) for c in window]
             terms = self._score(seqs)
             for i, combo in enumerate(window):
-                delta = self._total(terms[i]) - wt_nats
+                sites = tuple(m.position - 1 for m in combo)
+                delta, live = self._delta(terms[i], sites)
                 results.append(DdgResult(
                     label="+".join(str(m) for m in combo),
                     delta_nats=delta,
-                    ddg_kcal_per_mol=self.calibration.ddg(delta, self._n_tok),
+                    ddg_kcal_per_mol=self.calibration.ddg(
+                        delta, self._n_tok, n_mutations=len(combo)),
                     mutations=tuple(str(m) for m in combo),
+                    n_pairs=live,
                 ))
         return results
