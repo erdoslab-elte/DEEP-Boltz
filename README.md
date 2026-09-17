@@ -1,4 +1,4 @@
-<img src="logo.png" alt="DEEP-Boltz" width="400">
+<p align='center'><img src="logo.png" alt="DEEP-Boltz" width="400"></p>
 
 *Distogram Encoded Energetic Potential* with Boltz-2
 A zero-shot statistical potential from the **Boltz-2** structure prediction method.
