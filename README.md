@@ -1,14 +1,11 @@
 # DEEP-Boltz
 
+*Distogram Encoded Energetic Potential* with Boltz-2
 A zero-shot statistical potential from the **Boltz-2** structure prediction method.
-**DEEP** stands for *Distogram Encoded Energetic Potential*.
 
 DEEP-Boltz gives accurate estimates for protein stability using free energy calculation.
 
 ## Basic usage
-
-An alignment matters a lot here, and the easiest way to get one is to let
-DEEP-Boltz search for it — no alignment file needed:
 
 ```bash
 deep-boltz structure.pdb --use-msa-server --mutations G13C A20V T45S
@@ -25,6 +22,9 @@ machine:
 deep-boltz structure.pdb --msa alignment.a3m --mutations G13C A20V T45S
 ```
 
+An alignment matters a lot here, and the easiest way if you dont have one is to let
+DEEP-Boltz search for it, however DEEP-Boltz can run without an alignment as well with significant accuracy loss
+
 **A structure is optional.** DEEP-Boltz can also generate the reference wild type structure, 
 then scores mutations against its own prediction.
 
@@ -33,9 +33,7 @@ deep-boltz --sequence MKVLATDLA... --msa alignment.a3m --mutations G13C A20V T45
 ```
 
 On ProteinGym Stability, ΔΔG reaches **0.7197** mean per-assay Spearman over all
-117,811 substitutions. The two backbone routes are equivalent: folding the wild
-type scores **0.6596** against **0.6574** supplied, measured on the untruncated
-sum.
+117,811 substitutions. 
 
 ---
 
@@ -43,7 +41,7 @@ sum.
 
 DEEP-Boltz converts the structural information learned by Boltz-2 into an effective, sequence-dependent energy function.
 
-Boltz-2's distogram head predicts, for every pair of residues, a probability distribution over their spatial separation given the protein sequence. Through the Boltzmann relation, a probability distribution along a coordinate can be interpreted as an effective free-energy profile. We therefore treat the predicted distograms as defining an **implied potential of mean force (PMF)** over residue-residue distances.
+Boltz-2's distogram head predicts, for every pair of residues, a probability distribution over their spatial separation given the protein sequence. Through the Boltzmann relation, a probability distribution along a coordinate can be interpreted as an effective free-energy profile. We therefore treat the predicted distograms as defining an implied potential of mean force over residue-residue distances.
 
 This potential summarizes the interaction preferences learned by Boltz-2 from protein structures, with effects such as solvent and other unobserved degrees of freedom implicitly integrated out.
 
@@ -86,7 +84,7 @@ the chain. Restricting a ΔΔG to the pairs within **6 Å** of a mutated residue
 Distances come from the wild type and stay frozen across mutants.
 `--radius none` restores the untruncated sum.
 
-The wild type's own **energy**, printed above every ΔΔG table, has no mutated site
+The wild type's own energy, printed above every ΔΔG table, has no mutated site
 to measure from, so it is always the untruncated sum and `--radius` does not
 affect it.
 
@@ -110,14 +108,6 @@ region and is on average more destabilising, and one line cannot express both:
 
 Orders above two have no fitted scale and raise rather than return a
 plausible-looking number; `delta_nats` still ranks them.
-
-### Relation to the Boltz-2 diffusion process
-
-This reference-state interpretation is particularly relevant because Boltz-2 is a diffusion model. It was not trained to fold proteins starting from physically realistic unfolded conformations. Instead, structure generation begins from a highly noised, approximately Gaussian state.
-
-Consequently, the model does not contain an explicit physical unfolded-state ensemble that can be used directly as a reference state. Normalization by the far-distance bin provides a simple alternative: it removes the background probability of two residues being effectively non-interacting and isolates the model's preference for bringing them to a particular distance.
-
-In this sense, the far-bin normalization plays a role analogous to the **reference state in conventional statistical potentials**, while the resulting DEEP-Boltz score captures the sequence-dependent structural preferences encoded by Boltz-2.
 
 ## Installation
 
