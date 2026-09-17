@@ -13,7 +13,7 @@ Boltz-PMF search for it — no alignment file needed:
 boltz-pmf structure.pdb --use-msa-server --mutations G13C A20V T45S
 ```
 
-Boltz-PMF is a ΔΔG predictor, so `--mutations` is required. The wild-type letter
+The wild-type letter
 is optional — `13C` and `G13C` mean the same thing, and when you give it, it is
 checked against the scored chain.
 
@@ -72,9 +72,7 @@ The resulting score can therefore be interpreted as a **sequence-dependent effec
 ### Locality: ΔΔG is summed near the mutation
 
 A substitution is a local perturbation, but the sum above runs over every pair in
-the chain. Restricting a ΔΔG to the pairs within **6 Å** of a mutated residue —
-each pair taking the distance from its nearer endpoint — is a substantial
-improvement rather than a convenience:
+the chain. Restricting a ΔΔG to the pairs within **6 Å** of a mutated residue significantly improves accuracy.
 
 | ΔΔG summed over | mean per-assay Spearman |
 | --- | --- |
@@ -84,14 +82,7 @@ improvement rather than a convenience:
 | pairs within 12 Å | 0.6966 |
 | every pair | 0.6574 |
 
-Over all 117,811 substitutions of the 64 ProteinGym Tsuboyama assays. The radius
-was chosen on a 16-assay discovery set and held out on the remaining 48, where it
-won 42 of 48 assays. Beyond about 8 Å the extra pairs are, on net, noise.
-
-The mask is keyed on the mutated residue, so it is applied to the wild-type/mutant
-*difference* rather than to each structure separately — otherwise the two would be
-summed over different pair sets and the result would no longer be a difference of
-one system. Distances come from the wild type and stay frozen across mutants.
+Distances come from the wild type and stay frozen across mutants.
 `--radius none` restores the untruncated sum.
 
 The wild type's own **energy**, printed above every ΔΔG table, has no mutated site
@@ -106,8 +97,8 @@ protein contributes to its own calibration:
 
     ddG [kcal/mol] = slope * (dE / N) + intercept
 
-The coefficients depend on the radius, and — more than anything else — on **how
-many substitutions** are being scored at once. A double mutant perturbs a larger
+The coefficients depend on the radius, and on how many substitutions are being scored at once. 
+A double mutant perturbs a larger
 region and is on average more destabilising, and one line cannot express both:
 
 | at 6 Å | slope | intercept | LOAO RMSE | null |
@@ -115,10 +106,6 @@ region and is on average more destabilising, and one line cannot express both:
 | one substitution | 0.62551 | −0.41609 | **0.836** | 1.018 |
 | two substitutions | 0.18467 | −1.63024 | **0.989** | 1.030 |
 | both, one shared line | — | — | 1.024 | 1.194 |
-
-Splitting by order is worth **1.024 → 0.906** kcal/mol overall, a larger gain than
-any other change to the calibration. The choice of normaliser is not: `dE`,
-`dE/N` and `dE/√N` agree to 0.003 kcal/mol, so the original `dE/N` is kept.
 
 Orders above two have no fitted scale and raise rather than return a
 plausible-looking number; `delta_nats` still ranks them.
