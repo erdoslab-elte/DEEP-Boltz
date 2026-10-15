@@ -260,3 +260,7 @@ Each radius has its own slope, because truncating the sum changes the scale of
 `delta_nats` by more than a factor of two. `Calibration.for_radius` raises on a
 radius nothing was fitted for rather than returning a plausible-looking wrong
 number; pass `calibration=` explicitly if you have fitted your own.
+
+---
+
+The DEEP framework is currently under publication
