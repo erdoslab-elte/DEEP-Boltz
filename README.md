@@ -11,9 +11,11 @@ DEEP-Boltz gives accurate estimates for protein stability using free energy calc
 deep-boltz structure.pdb --use-msa-server --mutations G13C A20V T45S
 ```
 
-The wild-type letter
-is optional — `13C` and `G13C` mean the same thing, and when you give it, it is
-checked against the scored chain.
+DEEP-Boltz is a ΔΔG predictor, so `--mutations` (or `--mutations-file`) is
+required. The wild-type letter is optional — `13C` and `G13C` mean the same
+thing, and when you give it, it is checked against the scored chain. Join two
+substitutions with a colon, `G13C:A20V`, to score that specific double instead
+of enumerating every pair.
 
 If you already have an alignment, pass it instead and nothing leaves your
 machine:
@@ -242,11 +244,55 @@ neighbourhoods, which is why its count exceeds either single's. The labels are
 the resolved full form, so `10C` is echoed back as `A10C` and the output always
 says which residue was replaced.
 
+#### Scoring exactly the mutants you name
+
+Enumerating is right for a handful of substitutions and wrong for a panel: 100
+substitutions enumerate to 4,950 pairs, and each one costs a full model pass.
+**Join two substitutions with a colon and only the mutants you list are scored** —
+nothing is enumerated:
+
+```bash
+deep-boltz structure.pdb --msa alignment.a3m --mutations A10C F17R:T38V
+```
+
+```
+mutants            2 scored as listed
+
+mutation              ddG (kcal/mol)   delta (nats)   pairs
+-----------------------------------------------------------
+A10C                          -0.592          -13.2     340
+-- pairs --
+F17R+T38V                     -2.005          -95.5     520
+```
+
+One colon anywhere switches the whole list to this mode, so `A10C` above is
+scored on its own rather than paired with anything. For a long panel, put one
+mutant per line in a file — blank lines and `#` comments are ignored, and
+duplicates are scored once:
+
+```bash
+deep-boltz structure.pdb --msa alignment.a3m --mutations-file panel.txt
+```
+
+```
+# a defined panel
+A10C
+F17R:T38V
+I13V
+```
+
+**This changes what is computed, not how.** A mutant costs one model pass
+whichever way it is requested, because the potential is read from a distogram
+conditioned on that mutant's sequence; there is no shortcut that reuses the
+wild type's. What the explicit form saves is the passes you never wanted.
+
 ### Options worth knowing
 
 | flag | why |
 | --- | --- |
-| `--mutations G13C 20V` | **Required.** `G13C` or `20V`; the wild-type letter is optional and is checked when present. |
+| `--mutations G13C 20V` | **Required** (or `--mutations-file`). `G13C` or `20V`; the wild-type letter is optional and is checked when present. Join two with a colon, `G13C:A20V`, to score that specific double and switch off enumeration. |
+| `--mutations-file panel.txt` | The same notation, one mutant per line; `#` comments and blank lines ignored. Use it instead of listing a panel on the command line. |
+| `--max-order 2` | When entries are enumerated, `1` scores singles only and `2` adds every pair. Ignored once any entry names a double. |
 | `--msa alignment.a3m` | **Strongly recommended.** Without it the model runs single-sequence. |
 | `--use-msa-server` | No alignment at hand? Search one on an MMseqs2 server, the way `boltz predict --use_msa_server` does. Uploads the query sequence to `api.colabfold.com` (`--msa-server-url` to point elsewhere), and caches the result under `~/.deep_boltz/msa_cache` (`--msa-cache`) so later runs are offline. |
 | `--radius 6` | Å around each mutated residue that ΔΔG is summed over. The default is the selected value; `--radius none` gives the untruncated sum. Only radii with a fitted kcal/mol calibration are accepted (4, 6, 8, 10, 12, 16, 22, none). |
@@ -270,6 +316,24 @@ print(scorer.energy().kcal_per_mol)
 for r in scorer.ddg(["G13C", "A20V"]):
     print(r.label, r.ddg_kcal_per_mol)
 ```
+
+`ddg` takes the same two shapes as the command line. A flat list of single
+substitutions is enumerated; **a nested list is taken literally**, which is what
+you want for a defined panel of doubles:
+
+```python
+scorer.ddg(["G13C", "A20V"])                      # 2 singles + their pair
+scorer.ddg(["G13C", "A20V"], max_order=1)         # 2 singles
+
+scorer.ddg([["G13C"], ["A20V", "T45S"]])          # 1 single + 1 specific double
+scorer.ddg(["G13C", "A20V:T45S"])                 # the same two
+```
+
+Any entry naming more than one substitution — a nested list, or a string joined
+with `:` or `+` — switches the whole call to the literal form. Mutants of three
+or more substitutions are rejected, because the kcal/mol calibration is fitted
+for singles and doubles only; `delta_nats` is still meaningful if you need to
+rank them.
 
 Or with no structure at all:
 

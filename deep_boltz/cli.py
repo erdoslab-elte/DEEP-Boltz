@@ -22,6 +22,9 @@ examples:
   deep-boltz structure.pdb --msa alignment.a3m --mutations G13C A20V
   deep-boltz structure.pdb --mutations 13C 20V --json out.json
 
+  deep-boltz structure.pdb --mutations G13C A20V:T45S     # exactly these two
+  deep-boltz structure.pdb --mutations-file panel.txt     # one mutant per line
+
   deep-boltz --sequence MKVLA... --mutations G13C A20V
   deep-boltz --fasta target.fasta --msa alignment.a3m --mutations G13C
 
@@ -44,11 +47,19 @@ itself and scores mutations against its own prediction.
     source.add_argument("--fasta", type=Path, default=None,
                         help="FASTA file whose first record is the sequence to "
                              "fold. Equivalent to --sequence.")
-    p.add_argument("--mutations", nargs="+", metavar="G13C", required=True,
-                   help="Required. Substitutions as G13C or 13C, 1-based over "
-                        "the scored chain; the wild-type letter is optional and "
-                        "is checked against the chain when given. Every single "
-                        "and every pair is reported.")
+    p.add_argument("--mutations", nargs="+", metavar="G13C",
+                   help="Mutants to score, as G13C or 13C (1-based over the "
+                        "scored chain; the wild-type letter is optional and is "
+                        "checked against the chain when given). Join two with a "
+                        "colon, G13C:A20V, to score that specific double. If "
+                        "every entry is a single substitution, every pair of "
+                        "them is scored too; if any entry is a double, only the "
+                        "listed mutants are scored.")
+    p.add_argument("--mutations-file", type=Path, metavar="FILE",
+                   help="Read mutants from a file instead, one per line, in the "
+                        "same notation. Blank lines and lines beginning with # "
+                        "are ignored. Use this for a defined panel rather than "
+                        "listing hundreds of mutants on the command line.")
     p.add_argument("--chain", default=None,
                    help="Chain to score; default is the first protein chain.")
     p.add_argument("--msa", type=Path, default=None,
@@ -74,7 +85,9 @@ itself and scores mutations against its own prediction.
                         "Only radii with a fitted kcal/mol calibration are "
                         "accepted: 4, 6, 8, 10, 12, 16, 22, none.")
     p.add_argument("--max-order", type=int, default=2, choices=(1, 2),
-                   help="Highest combination order to report (default 2).")
+                   help="When entries are enumerated, the highest order to "
+                        "report: 1 for singles only, 2 (default) to add every "
+                        "pair. Ignored when the entries name doubles directly.")
     p.add_argument("--no-volume-correction", action="store_true",
                    help="Disable the radial-volume term. It cannot change ddG, "
                         "and it is what makes the score work on decoys.")
@@ -105,6 +118,30 @@ def main(argv: list[str] | None = None) -> int:
         print(f"no such file: {args.structure}", file=sys.stderr)
         return 2
 
+    # One of the two mutant sources is required; argparse cannot express that
+    # across two flags, so it is checked here.
+    if not args.mutations and args.mutations_file is None:
+        print("error: one of --mutations or --mutations-file is required; this "
+              "is a ddG predictor and there is nothing to score without one",
+              file=sys.stderr)
+        return 2
+    if args.mutations and args.mutations_file is not None:
+        print("error: pass either --mutations or --mutations-file, not both",
+              file=sys.stderr)
+        return 2
+    mutations = list(args.mutations or [])
+    if args.mutations_file is not None:
+        if not args.mutations_file.is_file():
+            print(f"no such file: {args.mutations_file}", file=sys.stderr)
+            return 2
+        for line in args.mutations_file.read_text().splitlines():
+            line = line.split("#", 1)[0].strip()
+            if line:
+                mutations.extend(line.split())
+        if not mutations:
+            print(f"no mutants found in {args.mutations_file}", file=sys.stderr)
+            return 2
+
     sequence = args.sequence
     if args.fasta is not None:
         if not args.fasta.is_file():
@@ -121,6 +158,7 @@ def main(argv: list[str] | None = None) -> int:
     if sequence is not None:
         sequence = "".join(sequence.split()).upper()
 
+    from . import mutations as _mut
     from .api import DEEPScorer, NoMSAWarning
     from .calibration import Calibration
     from .potential import PotentialConfig
@@ -214,7 +252,7 @@ def main(argv: list[str] | None = None) -> int:
              else f"{config.radius:g} A around each mutated residue"))
 
     try:
-        results = scorer.ddg(args.mutations, max_order=args.max_order,
+        results = scorer.ddg(mutations, max_order=args.max_order,
                              batch_size=args.batch_size)
     except ValueError as error:
         print(f"\nerror: {error}", file=sys.stderr)
@@ -223,6 +261,10 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     singles = [r for r in results if len(r.mutations) == 1]
     pairs = [r for r in results if len(r.mutations) == 2]
+    explicit = any(_mut.is_mutant_spec(m) for m in mutations)
+    print(f"mutants            {len(results)} scored "
+          + ("as listed" if explicit
+             else f"({len(singles)} single, {len(pairs)} enumerated pairs)"))
     print(f"\n{'mutation':<20}{'ddG (kcal/mol)':>16}{'delta (nats)':>15}"
           f"{'pairs':>8}")
     print("-" * 59)

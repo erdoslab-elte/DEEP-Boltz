@@ -119,9 +119,17 @@ def write_backbone_pdb(path: str | Path, folded: FoldedBackbone) -> Path:
         res_name = const.prot_letter_to_token.get(sequence[residue - 1], "UNK")
         for offset, name in enumerate(("N", "CA", "C", "O")):
             x, y, z = coords[index + offset]
+            # Column-exact PDB. The fields are fixed-width and every reader
+            # slices rather than splits, so a single missing space silently
+            # shifts the coordinates into the wrong columns instead of failing:
+            #   7-11 serial | 13-16 name | 17 altLoc | 18-20 resName
+            #   22 chainID  | 23-26 resSeq | 27 iCode | 31-54 xyz
+            #   55-60 occupancy | 61-66 tempFactor | 77-78 element
+            # The atom name is right-shifted by one because these are all
+            # one-letter elements, which is where it belongs in a 4-column field.
             lines.append(
-                f"ATOM  {serial:>5} {name:<4}{res_name:>3} A{residue:>4}    "
-                f"{x:8.3f}{y:8.3f}{z:8.3f}  1.00  0.00           {name[0]:>2}"
+                f"ATOM  {serial:>5}  {name:<3} {res_name:>3} A{residue:>4}    "
+                f"{x:8.3f}{y:8.3f}{z:8.3f}  1.00  0.00          {name[0]:>2}"
             )
             serial += 1
     lines.append("END")

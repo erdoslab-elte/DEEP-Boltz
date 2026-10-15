@@ -270,13 +270,54 @@ class DEEPScorer:
             per_residue_nats=residue_profile(terms, self._weights),
         )
 
-    def ddg(self, tokens: list[str], *, max_order: int = 2,
+    def ddg(self, mutations, *, max_order: int = 2,
             batch_size: int = 8) -> list[DdgResult]:
-        if not tokens:
+        """ddG for each requested mutant.
+
+        Two input shapes, chosen by what is written rather than by a flag:
+
+        *Enumerate.* A flat list of single substitutions scores every one of
+        them and every pair of them, up to `max_order`::
+
+            ddg(["A10C", "F17R", "T38V"])      # 3 singles + 3 doubles
+            ddg(["A10C", "F17R"], max_order=1) # 2 singles
+
+        *Exactly these.* If any entry names a mutant of more than one
+        substitution -- a nested list, or a string joined with ``:`` or ``+`` --
+        then every entry is taken literally and nothing is enumerated::
+
+            ddg([["A10C"], ["F17R", "T38V"]])  # 1 single + 1 specific double
+            ddg(["A10C", "F17R:T38V"])         # the same two
+
+        The second form is what you want for a defined panel of double mutants:
+        the enumerating form scores n(n-1)/2 pairs, which for 100 substitutions
+        is 4,950 trunk passes rather than the handful actually wanted.
+        """
+
+        if not mutations:
             raise ValueError(
                 "ddg() needs at least one substitution, there is nothing to score without one")
-        parsed = [mut.resolve(mut.parse(t), self.sequence) for t in tokens]
-        combos = mut.combinations(parsed, max_order=max_order)
+
+        explicit = any(mut.is_mutant_spec(m) for m in mutations)
+        if explicit:
+            combos = [mut.parse_mutant(m, self.sequence) for m in mutations]
+            over = {len(c) for c in combos if len(c) > 2}
+            if over:
+                raise ValueError(
+                    f"mutants of {sorted(over)} substitutions were requested, but "
+                    f"only singles and doubles have a kcal/mol calibration; see "
+                    f"`Calibration.fit_for`. Score them in nats by reading "
+                    f"`delta_nats`, or drop them from the list.")
+            seen, unique = set(), []
+            for combo in combos:
+                key = tuple(sorted(str(m) for m in combo))
+                if key not in seen:
+                    seen.add(key)
+                    unique.append(combo)
+            combos = unique
+        else:
+            parsed = [mut.resolve(mut.parse(t), self.sequence) for t in mutations]
+            combos = mut.combinations(parsed, max_order=max_order)
 
         results: list[DdgResult] = []
         for start in range(0, len(combos), batch_size):

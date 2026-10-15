@@ -5,6 +5,11 @@ scored chain and a mismatch is an error, which is worth having: it catches a
 numbering offset immediately rather than silently scoring the wrong residue. When
 it is absent it is read from the chain, and every label the program prints is the
 resolved full form, so the output always says which residue was replaced.
+
+A *mutant* is one or more substitutions applied together. It may be written as a
+list of tokens, ``["G13C", "A20V"]``, or joined into one string with ``:`` or
+``+``, as ``"G13C:A20V"`` -- the colon form is what ProteinGym and most ddG
+benchmarks use, so a mutant list can be fed in as it comes.
 """
 
 from __future__ import annotations
@@ -15,6 +20,7 @@ from dataclasses import dataclass
 
 MUTATION = re.compile(r"^([A-Z])?(\d+)([A-Z])$")
 AMINO_ACIDS = set("ACDEFGHIKLMNPQRSTVWY")
+SEPARATORS = (":", "+")
 
 
 @dataclass(frozen=True)
@@ -78,6 +84,46 @@ def apply(sequence: str, mutations: tuple[Mutation, ...]) -> str:
     for mutation in mutations:
         letters[mutation.position - 1] = mutation.mutant
     return "".join(letters)
+
+
+def is_mutant_spec(item) -> bool:
+    """Does `item` name a mutant of more than one substitution?
+
+    This is what distinguishes "score exactly these mutants" from "enumerate
+    combinations of these substitutions". A caller who spells out a double has
+    said which doubles they want.
+    """
+
+    if isinstance(item, (list, tuple, set)):
+        return True
+    return any(sep in str(item) for sep in SEPARATORS)
+
+
+def parse_mutant(spec, sequence: str) -> tuple[Mutation, ...]:
+    """One mutant -> its substitutions, resolved against `sequence`.
+
+    Accepts ``"G13C"``, ``"G13C:A20V"``, ``"G13C+A20V"`` or ``["G13C", "A20V"]``.
+    """
+
+    if isinstance(spec, (list, tuple)):
+        tokens = [str(t).strip() for t in spec]
+    else:
+        text = str(spec).strip()
+        for sep in SEPARATORS[1:]:
+            text = text.replace(sep, SEPARATORS[0])
+        tokens = [t for t in text.split(SEPARATORS[0]) if t.strip()]
+    if not tokens:
+        raise ValueError(f"empty mutant {spec!r}")
+
+    out = tuple(resolve(parse(t), sequence) for t in tokens)
+    seen: dict[int, Mutation] = {}
+    for m in out:
+        if m.position in seen:
+            raise ValueError(
+                f"mutant {spec!r} has two substitutions at position "
+                f"{m.position}: {seen[m.position]} and {m}")
+        seen[m.position] = m
+    return out
 
 
 def combinations(mutations: list[Mutation], max_order: int = 2):
