@@ -22,7 +22,7 @@ examples:
   deep-boltz structure.pdb --msa alignment.a3m --mutations G13C A20V
   deep-boltz structure.pdb --mutations 13C 20V --json out.json
 
-  deep-boltz structure.pdb --mutations G13C A20V:T45S     # exactly these two
+  deep-boltz structure.pdb --mutations G13C A20V:T45S     # one single, one double
   deep-boltz structure.pdb --mutations-file panel.txt     # one mutant per line
 
   deep-boltz --sequence MKVLA... --mutations G13C A20V
@@ -51,10 +51,8 @@ itself and scores mutations against its own prediction.
                    help="Mutants to score, as G13C or 13C (1-based over the "
                         "scored chain; the wild-type letter is optional and is "
                         "checked against the chain when given). Join two with a "
-                        "colon, G13C:A20V, to score that specific double. If "
-                        "every entry is a single substitution, every pair of "
-                        "them is scored too; if any entry is a double, only the "
-                        "listed mutants are scored.")
+                        "colon, G13C:A20V, for one double. Only the mutants "
+                        "listed are scored; no combinations are generated.")
     p.add_argument("--mutations-file", type=Path, metavar="FILE",
                    help="Read mutants from a file instead, one per line, in the "
                         "same notation. Blank lines and lines beginning with # "
@@ -84,10 +82,6 @@ itself and scores mutations against its own prediction.
                         "for the untruncated sum). Pass `none` for every pair. "
                         "Only radii with a fitted kcal/mol calibration are "
                         "accepted: 4, 6, 8, 10, 12, 16, 22, none.")
-    p.add_argument("--max-order", type=int, default=2, choices=(1, 2),
-                   help="When entries are enumerated, the highest order to "
-                        "report: 1 for singles only, 2 (default) to add every "
-                        "pair. Ignored when the entries name doubles directly.")
     p.add_argument("--no-volume-correction", action="store_true",
                    help="Disable the radial-volume term. It cannot change ddG, "
                         "and it is what makes the score work on decoys.")
@@ -158,7 +152,6 @@ def main(argv: list[str] | None = None) -> int:
     if sequence is not None:
         sequence = "".join(sequence.split()).upper()
 
-    from . import mutations as _mut
     from .api import DEEPScorer, NoMSAWarning
     from .calibration import Calibration
     from .potential import PotentialConfig
@@ -252,8 +245,7 @@ def main(argv: list[str] | None = None) -> int:
              else f"{config.radius:g} A around each mutated residue"))
 
     try:
-        results = scorer.ddg(mutations, max_order=args.max_order,
-                             batch_size=args.batch_size)
+        results = scorer.ddg(mutations, batch_size=args.batch_size)
     except ValueError as error:
         print(f"\nerror: {error}", file=sys.stderr)
         print(f"the scored chain begins {energy.sequence[:30]}...",
@@ -261,10 +253,8 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     singles = [r for r in results if len(r.mutations) == 1]
     pairs = [r for r in results if len(r.mutations) == 2]
-    explicit = any(_mut.is_mutant_spec(m) for m in mutations)
     print(f"mutants            {len(results)} scored "
-          + ("as listed" if explicit
-             else f"({len(singles)} single, {len(pairs)} enumerated pairs)"))
+          f"({len(singles)} single, {len(pairs)} double)")
     print(f"\n{'mutation':<20}{'ddG (kcal/mol)':>16}{'delta (nats)':>15}"
           f"{'pairs':>8}")
     print("-" * 59)

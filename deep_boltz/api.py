@@ -270,54 +270,47 @@ class DEEPScorer:
             per_residue_nats=residue_profile(terms, self._weights),
         )
 
-    def ddg(self, mutations, *, max_order: int = 2,
-            batch_size: int = 8) -> list[DdgResult]:
-        """ddG for each requested mutant.
+    def ddg(self, mutations, *, batch_size: int = 8) -> list[DdgResult]:
+        """ddG for each mutant listed, and only those.
 
-        Two input shapes, chosen by what is written rather than by a flag:
+        Every entry is one mutant. A single substitution is scored on its own;
+        two joined with ``:`` or ``+``, or given as a nested list, are scored as
+        one double::
 
-        *Enumerate.* A flat list of single substitutions scores every one of
-        them and every pair of them, up to `max_order`::
+            ddg(["G13C", "A20V"])                 # two singles
+            ddg(["G13C", "A20V:T45S"])            # one single, one double
+            ddg([["G13C"], ["A20V", "T45S"]])     # the same two
 
-            ddg(["A10C", "F17R", "T38V"])      # 3 singles + 3 doubles
-            ddg(["A10C", "F17R"], max_order=1) # 2 singles
+        Nothing is enumerated: asking for n substitutions costs n model passes,
+        not n(n-1)/2. To score a pair, name it.
 
-        *Exactly these.* If any entry names a mutant of more than one
-        substitution -- a nested list, or a string joined with ``:`` or ``+`` --
-        then every entry is taken literally and nothing is enumerated::
-
-            ddg([["A10C"], ["F17R", "T38V"]])  # 1 single + 1 specific double
-            ddg(["A10C", "F17R:T38V"])         # the same two
-
-        The second form is what you want for a defined panel of double mutants:
-        the enumerating form scores n(n-1)/2 pairs, which for 100 substitutions
-        is 4,950 trunk passes rather than the handful actually wanted.
+        Mutants of three or more substitutions are refused, because the kcal/mol
+        calibration is fitted for singles and doubles only.
         """
 
         if not mutations:
             raise ValueError(
                 "ddg() needs at least one substitution, there is nothing to score without one")
+        if isinstance(mutations, str):
+            raise TypeError(
+                f"ddg() takes a list of mutants, not the single string "
+                f"{mutations!r}; pass [{mutations!r}]")
 
-        explicit = any(mut.is_mutant_spec(m) for m in mutations)
-        if explicit:
-            combos = [mut.parse_mutant(m, self.sequence) for m in mutations]
-            over = {len(c) for c in combos if len(c) > 2}
-            if over:
-                raise ValueError(
-                    f"mutants of {sorted(over)} substitutions were requested, but "
-                    f"only singles and doubles have a kcal/mol calibration; see "
-                    f"`Calibration.fit_for`. Score them in nats by reading "
-                    f"`delta_nats`, or drop them from the list.")
-            seen, unique = set(), []
-            for combo in combos:
-                key = tuple(sorted(str(m) for m in combo))
-                if key not in seen:
-                    seen.add(key)
-                    unique.append(combo)
-            combos = unique
-        else:
-            parsed = [mut.resolve(mut.parse(t), self.sequence) for t in mutations]
-            combos = mut.combinations(parsed, max_order=max_order)
+        combos = [mut.parse_mutant(m, self.sequence) for m in mutations]
+        over = sorted({len(c) for c in combos if len(c) > 2})
+        if over:
+            raise ValueError(
+                f"mutants of {over} substitutions were requested, but only "
+                f"singles and doubles have a kcal/mol calibration; see "
+                f"`Calibration.fit_for`. Read `delta_nats` to rank them, or "
+                f"drop them from the list.")
+        seen, unique = set(), []
+        for combo in combos:
+            key = tuple(sorted(str(m) for m in combo))
+            if key not in seen:
+                seen.add(key)
+                unique.append(combo)
+        combos = unique
 
         results: list[DdgResult] = []
         for start in range(0, len(combos), batch_size):

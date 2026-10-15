@@ -14,7 +14,6 @@ benchmarks use, so a mutant list can be fed in as it comes.
 
 from __future__ import annotations
 
-import itertools
 import re
 from dataclasses import dataclass
 
@@ -86,19 +85,6 @@ def apply(sequence: str, mutations: tuple[Mutation, ...]) -> str:
     return "".join(letters)
 
 
-def is_mutant_spec(item) -> bool:
-    """Does `item` name a mutant of more than one substitution?
-
-    This is what distinguishes "score exactly these mutants" from "enumerate
-    combinations of these substitutions". A caller who spells out a double has
-    said which doubles they want.
-    """
-
-    if isinstance(item, (list, tuple, set)):
-        return True
-    return any(sep in str(item) for sep in SEPARATORS)
-
-
 def parse_mutant(spec, sequence: str) -> tuple[Mutation, ...]:
     """One mutant -> its substitutions, resolved against `sequence`.
 
@@ -123,16 +109,4 @@ def parse_mutant(spec, sequence: str) -> tuple[Mutation, ...]:
                 f"mutant {spec!r} has two substitutions at position "
                 f"{m.position}: {seen[m.position]} and {m}")
         seen[m.position] = m
-    return out
-
-
-def combinations(mutations: list[Mutation], max_order: int = 2):
-    """Every single, then every pair, in the order a reader expects them."""
-
-    out: list[tuple[Mutation, ...]] = []
-    for order in range(1, max_order + 1):
-        for combo in itertools.combinations(mutations, order):
-            positions = [m.position for m in combo]
-            if len(set(positions)) == len(positions):
-                out.append(combo)
     return out
